@@ -20,27 +20,33 @@ module.exports = (io) => {
 
     // Send message
     socket.on('sendMessage', async ({ chatId, senderId, text }) => {
-      try {
-        const message = await Message.create({
-          chat: chatId, sender: senderId, text, status: 'sent'
-        });
-        await Chat.findByIdAndUpdate(chatId, { lastMessage: message._id });
-        const populated = await message.populate('sender', 'name');
+  try {
+    const chat = await Chat.findById(chatId).populate('members');
+    
+    // Check if all members still exist
+    const allMembersExist = chat.members.every(m => m !== null);
+    if (!allMembersExist) {
+      socket.emit('chatError', { message: 'This person is no longer available' });
+      return;
+    }
 
-        io.to(chatId).emit('newMessage', populated);
+    const message = await Message.create({
+      chat: chatId, sender: senderId, text, status: 'sent'
+    });
+    await Chat.findByIdAndUpdate(chatId, { lastMessage: message._id });
+    const populated = await message.populate('sender', 'name');
+    io.to(chatId).emit('newMessage', populated);
 
-        // Mark delivered if recipient is online
-        const chat = await Chat.findById(chatId);
-        chat.members.forEach(async (memberId) => {
-          if (memberId.toString() !== senderId && onlineUsers.has(memberId.toString())) {
-            await Message.findByIdAndUpdate(message._id, { status: 'delivered' });
-            io.to(chatId).emit('messageStatus', { messageId: message._id, status: 'delivered' });
-          }
-        });
-      } catch (err) {
-        console.log(err);
+    chat.members.forEach(async (memberId) => {
+      if (memberId.toString() !== senderId && onlineUsers.has(memberId.toString())) {
+        await Message.findByIdAndUpdate(message._id, { status: 'delivered' });
+        io.to(chatId).emit('messageStatus', { messageId: message._id, status: 'delivered' });
       }
     });
+  } catch (err) {
+    console.log(err);
+  }
+});
 
     // Mark messages as read
     socket.on('markRead', async ({ chatId, userId }) => {

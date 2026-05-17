@@ -9,11 +9,17 @@ router.get('/', auth, async (req, res) => {
     const chats = await Chat.find({ members: req.user.id })
       .populate('members', '-password')
       .populate('lastMessage');
-    res.json(chats);
+    
+    // Filter out chats where any member failed to populate (deleted users)
+    const validChats = chats.filter(chat => 
+      chat.members.every(member => member !== null)
+    );
+    
+    res.json(validChats);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
-});
+    });
 
 // Create 1-on-1 chat
 router.post('/create', auth, async (req, res) => {
