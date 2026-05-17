@@ -13,42 +13,42 @@ module.exports = (io) => {
       io.emit('userOnline', userId);
     }
 
-    // Join chat room
     socket.on('joinChat', (chatId) => {
       socket.join(chatId);
     });
 
-    // Send message
     socket.on('sendMessage', async ({ chatId, senderId, text }) => {
-  try {
-    const chat = await Chat.findById(chatId).populate('members');
-    
-    // Check if all members still exist
-    const allMembersExist = chat.members.every(m => m !== null);
-    if (!allMembersExist) {
-      socket.emit('chatError', { message: 'This person is no longer available' });
-      return;
-    }
+      try {
+        const chat = await Chat.findById(chatId).populate('members');
 
-    const message = await Message.create({
-      chat: chatId, sender: senderId, text, status: 'sent'
-    });
-    await Chat.findByIdAndUpdate(chatId, { lastMessage: message._id });
-    const populated = await message.populate('sender', 'name');
-    io.to(chatId).emit('newMessage', populated);
+        for (const member of chat.members) {
+          const memberId = member._id || member;
+          const exists = await User.findById(memberId);
+          if (!exists) {
+            socket.emit('chatError', { message: 'This person is no longer available' });
+            return;
+          }
+        }
 
-    chat.members.forEach(async (memberId) => {
-      if (memberId.toString() !== senderId && onlineUsers.has(memberId.toString())) {
-        await Message.findByIdAndUpdate(message._id, { status: 'delivered' });
-        io.to(chatId).emit('messageStatus', { messageId: message._id, status: 'delivered' });
+        const message = await Message.create({
+          chat: chatId, sender: senderId, text, status: 'sent'
+        });
+        await Chat.findByIdAndUpdate(chatId, { lastMessage: message._id });
+        const populated = await message.populate('sender', 'name');
+        io.to(chatId).emit('newMessage', populated);
+
+        chat.members.forEach(async (member) => {
+          const memberId = member._id || member;
+          if (memberId.toString() !== senderId && onlineUsers.has(memberId.toString())) {
+            await Message.findByIdAndUpdate(message._id, { status: 'delivered' });
+            io.to(chatId).emit('messageStatus', { messageId: message._id, status: 'delivered' });
+          }
+        });
+      } catch (err) {
+        console.log(err);
       }
     });
-  } catch (err) {
-    console.log(err);
-  }
-});
 
-    // Mark messages as read
     socket.on('markRead', async ({ chatId, userId }) => {
       try {
         await Message.updateMany(
@@ -61,7 +61,6 @@ module.exports = (io) => {
       }
     });
 
-    // Disconnect
     socket.on('disconnect', () => {
       if (userId) {
         onlineUsers.delete(userId);
