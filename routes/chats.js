@@ -83,5 +83,16 @@ router.delete('/:chatId/messages', auth, async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
-
+router.delete('/message/:messageId', auth, async (req, res) => {
+  try {
+    const message = await Message.findById(req.params.messageId);
+    if (!message) return res.status(404).json({ message: 'Message not found' });
+    if (message.sender.toString() !== req.user.id)
+      return res.status(403).json({ message: 'Not your message' });
+    await Message.findByIdAndDelete(req.params.messageId);
+    res.json({ message: 'Deleted' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
 module.exports = router;
