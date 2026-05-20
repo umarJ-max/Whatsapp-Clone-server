@@ -7,6 +7,13 @@ const User = require('../models/User');
 router.post('/register', async (req, res) => {
   try {
     const { name, phone, password } = req.body;
+
+    // Max 10 users limit
+    const userCount = await User.countDocuments();
+    if (userCount >= 10) {
+      return res.status(403).json({ message: 'This app is full. No more registrations allowed.' });
+    }
+
     const exists = await User.findOne({ phone });
     if (exists) return res.status(400).json({ message: 'Phone already registered' });
 
