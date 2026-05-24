@@ -8,7 +8,8 @@ router.get('/', auth, async (req, res) => {
   try {
     const chats = await Chat.find({ members: req.user.id })
       .populate('members', '-password')
-      .populate('lastMessage');
+      .populate('lastMessage')
+      .populate('admin', 'name _id');
 
     const validChats = chats.filter(chat => {
       return chat.members.every(member => member !== null && member !== undefined);
@@ -23,16 +24,13 @@ router.get('/', auth, async (req, res) => {
 router.post('/create', auth, async (req, res) => {
   try {
     const { userId } = req.body;
-
     const otherUser = await User.findById(userId);
     if (!otherUser) return res.status(404).json({ message: 'User not found' });
-
     const existing = await Chat.findOne({
       isGroup: false,
       members: { $all: [req.user.id, userId] }
     });
     if (existing) return res.json(existing);
-
     const chat = await Chat.create({ members: [req.user.id, userId] });
     res.json(chat);
   } catch (err) {
@@ -102,7 +100,8 @@ router.delete('/message/:messageId', auth, async (req, res) => {
 router.put('/:chatId/group', auth, async (req, res) => {
   try {
     const chat = await Chat.findById(req.params.chatId);
-    if (chat.admin.toString() !== req.user.id)
+    const adminId = chat.admin?._id || chat.admin;
+    if (adminId.toString() !== req.user.id)
       return res.status(403).json({ message: 'Only admin can update group' });
     const { name, description } = req.body;
     await Chat.findByIdAndUpdate(req.params.chatId, { name, description });
@@ -115,7 +114,8 @@ router.put('/:chatId/group', auth, async (req, res) => {
 router.put('/:chatId/remove-member', auth, async (req, res) => {
   try {
     const chat = await Chat.findById(req.params.chatId);
-    if (chat.admin.toString() !== req.user.id)
+    const adminId = chat.admin?._id || chat.admin;
+    if (adminId.toString() !== req.user.id)
       return res.status(403).json({ message: 'Only admin can remove members' });
     await Chat.findByIdAndUpdate(req.params.chatId, {
       $pull: { members: req.body.memberId }
@@ -129,7 +129,8 @@ router.put('/:chatId/remove-member', auth, async (req, res) => {
 router.put('/:chatId/make-admin', auth, async (req, res) => {
   try {
     const chat = await Chat.findById(req.params.chatId);
-    if (chat.admin.toString() !== req.user.id)
+    const adminId = chat.admin?._id || chat.admin;
+    if (adminId.toString() !== req.user.id)
       return res.status(403).json({ message: 'Only admin can assign new admin' });
     await Chat.findByIdAndUpdate(req.params.chatId, { admin: req.body.memberId });
     res.json({ message: 'New admin assigned' });
@@ -144,7 +145,8 @@ router.put('/:chatId/leave', auth, async (req, res) => {
     await Chat.findByIdAndUpdate(req.params.chatId, {
       $pull: { members: req.user.id }
     });
-    if (chat.admin.toString() === req.user.id) {
+    const adminId = chat.admin?._id || chat.admin;
+    if (adminId && adminId.toString() === req.user.id) {
       const remaining = chat.members.filter(m => m.toString() !== req.user.id);
       if (remaining.length > 0) {
         await Chat.findByIdAndUpdate(req.params.chatId, { admin: remaining[0] });
