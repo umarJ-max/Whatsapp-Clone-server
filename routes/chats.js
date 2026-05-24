@@ -54,12 +54,20 @@ router.post('/group', auth, async (req, res) => {
   }
 });
 
-router.get('/:chatId/messages', auth, async (req, res) => {
+router.get('/', auth, async (req, res) => {
   try {
-    const messages = await Message.find({ chat: req.params.chatId })
-      .populate('sender', 'name');
-    res.json(messages);
+    const chats = await Chat.find({ members: req.user.id })
+      .populate('members', '-password')
+      .populate('lastMessage')
+      .populate({ path: 'admin', select: 'name _id', options: { strictPopulate: false } });
+
+    const validChats = chats.filter(chat => {
+      return chat.members.every(member => member !== null && member !== undefined);
+    });
+
+    res.json(validChats);
   } catch (err) {
+    console.log('Chat fetch error:', err);
     res.status(500).json({ message: err.message });
   }
 });
