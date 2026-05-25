@@ -8,15 +8,28 @@ router.get('/', auth, async (req, res) => {
   try {
     const chats = await Chat.find({ members: req.user.id })
       .populate('members', '-password')
-      .populate('lastMessage')
-      .populate('admin', 'name _id');
+      .populate('lastMessage');
 
     const validChats = chats.filter(chat => {
       return chat.members.every(member => member !== null && member !== undefined);
     });
 
-    res.json(validChats);
+    const populated = await Promise.all(validChats.map(async (chat) => {
+      const chatObj = chat.toObject();
+      if (chatObj.isGroup && chatObj.admin) {
+        try {
+          const adminUser = await User.findById(chatObj.admin).select('name _id');
+          chatObj.admin = adminUser;
+        } catch (e) {
+          chatObj.admin = null;
+        }
+      }
+      return chatObj;
+    }));
+
+    res.json(populated);
   } catch (err) {
+    console.log('Chat fetch error:', err.message);
     res.status(500).json({ message: err.message });
   }
 });
@@ -54,20 +67,12 @@ router.post('/group', auth, async (req, res) => {
   }
 });
 
-router.get('/', auth, async (req, res) => {
+router.get('/:chatId/messages', auth, async (req, res) => {
   try {
-    const chats = await Chat.find({ members: req.user.id })
-      .populate('members', '-password')
-      .populate('lastMessage')
-      .populate({ path: 'admin', select: 'name _id', options: { strictPopulate: false } });
-
-    const validChats = chats.filter(chat => {
-      return chat.members.every(member => member !== null && member !== undefined);
-    });
-
-    res.json(validChats);
+    const messages = await Message.find({ chat: req.params.chatId })
+      .populate('sender', 'name');
+    res.json(messages);
   } catch (err) {
-    console.log('Chat fetch error:', err);
     res.status(500).json({ message: err.message });
   }
 });
@@ -82,16 +87,6 @@ router.delete('/:chatId/messages', auth, async (req, res) => {
   }
 });
 
-router.delete('/:chatId', auth, async (req, res) => {
-  try {
-    await Chat.findByIdAndDelete(req.params.chatId);
-    await Message.deleteMany({ chat: req.params.chatId });
-    res.json({ message: 'Chat deleted' });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
 router.delete('/message/:messageId', auth, async (req, res) => {
   try {
     const message = await Message.findById(req.params.messageId);
@@ -100,6 +95,16 @@ router.delete('/message/:messageId', auth, async (req, res) => {
       return res.status(403).json({ message: 'Not your message' });
     await Message.findByIdAndDelete(req.params.messageId);
     res.json({ message: 'Deleted' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.delete('/:chatId', auth, async (req, res) => {
+  try {
+    await Chat.findByIdAndDelete(req.params.chatId);
+    await Message.deleteMany({ chat: req.params.chatId });
+    res.json({ message: 'Chat deleted' });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
