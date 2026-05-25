@@ -39,20 +39,25 @@ router.post('/match-contacts', auth, async (req, res) => {
       return res.status(400).json({ message: 'Phone numbers required' });
     }
 
-    // Normalize phone numbers - remove spaces, dashes, brackets
-    const normalized = phoneNumbers.map(n =>
-      n.replace(/[\s\-\(\)\+]/g, '')
-    );
+    // Extract last 10 digits from each number for matching
+    const normalized = phoneNumbers
+      .map(n => n.replace(/[\s\-\(\)\+]/g, ''))
+      .filter(n => n.length >= 7)
+      .map(n => n.slice(-10));
 
-    // Find all users except self whose phone matches any contact
+    if (normalized.length === 0) return res.json([]);
+
     const users = await User.find({
-      _id: { $ne: req.user.id },
-      $or: normalized.map(n => ({
-        phone: { $regex: n.slice(-10), $options: 'i' }
-      }))
+      _id: { $ne: req.user.id }
     }).select('-password');
 
-    res.json(users);
+    // Match by last 10 digits
+    const matched = users.filter(user => {
+      const userLast10 = user.phone.replace(/[\s\-\(\)\+]/g, '').slice(-10);
+      return normalized.includes(userLast10);
+    });
+
+    res.json(matched);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
