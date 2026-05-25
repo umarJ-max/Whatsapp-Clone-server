@@ -7,6 +7,7 @@ const userSchema = new mongoose.Schema({
   avatar: { type: String, default: '' },
   isOnline: { type: Boolean, default: false },
   lastSeen: { type: Date, default: Date.now },
+  pushToken: { type: String, default: '' },
 }, { timestamps: true });
 
 module.exports = mongoose.model('User', userSchema);

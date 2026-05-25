@@ -4,6 +4,29 @@ const User = require('../models/User');
 
 const onlineUsers = new Map();
 
+async function sendPushNotification(pushToken, title, body) {
+  if (!pushToken) return;
+  try {
+    await fetch('https://exp.host/--/api/v2/push/send', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Accept-Encoding': 'gzip, deflate',
+      },
+      body: JSON.stringify({
+        to: pushToken,
+        sound: 'default',
+        title,
+        body,
+        data: {},
+      }),
+    });
+  } catch (err) {
+    console.log('Push notification error:', err.message);
+  }
+}
+
 module.exports = (io) => {
   io.on('connection', (socket) => {
     const userId = socket.handshake.query.userId;
@@ -37,11 +60,22 @@ module.exports = (io) => {
         const populated = await message.populate('sender', 'name');
         io.to(chatId).emit('newMessage', populated);
 
+        const sender = await User.findById(senderId);
+
         chat.members.forEach(async (member) => {
           const memberId = member._id || member;
-          if (memberId.toString() !== senderId && onlineUsers.has(memberId.toString())) {
-            await Message.findByIdAndUpdate(message._id, { status: 'delivered' });
-            io.to(chatId).emit('messageStatus', { messageId: message._id, status: 'delivered' });
+          if (memberId.toString() !== senderId) {
+            if (onlineUsers.has(memberId.toString())) {
+              await Message.findByIdAndUpdate(message._id, { status: 'delivered' });
+              io.to(chatId).emit('messageStatus', { messageId: message._id, status: 'delivered' });
+            } else {
+              // Send push notification to offline user
+              const recipient = await User.findById(memberId);
+              if (recipient?.pushToken) {
+                const title = chat.isGroup ? `${chat.name}` : sender.name;
+                await sendPushNotification(recipient.pushToken, title, text);
+              }
+            }
           }
         });
       } catch (err) {
