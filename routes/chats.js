@@ -69,8 +69,15 @@ router.post('/group', auth, async (req, res) => {
 
 router.get('/:chatId/messages', auth, async (req, res) => {
   try {
-    const messages = await Message.find({ chat: req.params.chatId })
-      .populate('sender', 'name');
+    const chat = await Chat.findById(req.params.chatId);
+    const userClear = chat.clearedBy?.find(
+      c => c.user.toString() === req.user.id
+    );
+    const query = { chat: req.params.chatId };
+    if (userClear) {
+      query.createdAt = { $gt: userClear.clearedAt };
+    }
+    const messages = await Message.find(query).populate('sender', 'name');
     res.json(messages);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -79,8 +86,14 @@ router.get('/:chatId/messages', auth, async (req, res) => {
 
 router.delete('/:chatId/messages', auth, async (req, res) => {
   try {
-    await Message.deleteMany({ chat: req.params.chatId });
-    await Chat.findByIdAndUpdate(req.params.chatId, { lastMessage: null });
+    const chat = await Chat.findById(req.params.chatId);
+    // Remove existing entry for this user if any, then add fresh one
+    await Chat.findByIdAndUpdate(req.params.chatId, {
+      $pull: { clearedBy: { user: req.user.id } }
+    });
+    await Chat.findByIdAndUpdate(req.params.chatId, {
+      $push: { clearedBy: { user: req.user.id, clearedAt: new Date() } }
+    });
     res.json({ message: 'Chat cleared' });
   } catch (err) {
     res.status(500).json({ message: err.message });
