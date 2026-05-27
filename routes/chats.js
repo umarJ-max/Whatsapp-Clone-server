@@ -59,7 +59,8 @@ router.post('/group', auth, async (req, res) => {
       name,
       description: description || '',
       members: [...members, req.user.id],
-      admin: req.user.id
+      admin: req.user.id,
+      admins: [req.user.id]
     });
     res.json(chat);
   } catch (err) {
@@ -86,8 +87,6 @@ router.get('/:chatId/messages', auth, async (req, res) => {
 
 router.delete('/:chatId/messages', auth, async (req, res) => {
   try {
-    const chat = await Chat.findById(req.params.chatId);
-    // Remove existing entry for this user if any, then add fresh one
     await Chat.findByIdAndUpdate(req.params.chatId, {
       $pull: { clearedBy: { user: req.user.id } }
     });
@@ -126,8 +125,9 @@ router.delete('/:chatId', auth, async (req, res) => {
 router.put('/:chatId/group', auth, async (req, res) => {
   try {
     const chat = await Chat.findById(req.params.chatId);
-    const adminId = chat.admin?._id || chat.admin;
-    if (adminId.toString() !== req.user.id)
+    const isAdmin = chat.admins?.some(a => a.toString() === req.user.id) ||
+      (chat.admin?._id || chat.admin)?.toString() === req.user.id;
+    if (!isAdmin)
       return res.status(403).json({ message: 'Only admin can update group' });
     const { name, description } = req.body;
     await Chat.findByIdAndUpdate(req.params.chatId, { name, description });
@@ -140,11 +140,12 @@ router.put('/:chatId/group', auth, async (req, res) => {
 router.put('/:chatId/remove-member', auth, async (req, res) => {
   try {
     const chat = await Chat.findById(req.params.chatId);
-    const adminId = chat.admin?._id || chat.admin;
-    if (adminId.toString() !== req.user.id)
+    const isAdmin = chat.admins?.some(a => a.toString() === req.user.id) ||
+      (chat.admin?._id || chat.admin)?.toString() === req.user.id;
+    if (!isAdmin)
       return res.status(403).json({ message: 'Only admin can remove members' });
     await Chat.findByIdAndUpdate(req.params.chatId, {
-      $pull: { members: req.body.memberId }
+      $pull: { members: req.body.memberId, admins: req.body.memberId }
     });
     res.json({ message: 'Member removed' });
   } catch (err) {
@@ -155,11 +156,31 @@ router.put('/:chatId/remove-member', auth, async (req, res) => {
 router.put('/:chatId/make-admin', auth, async (req, res) => {
   try {
     const chat = await Chat.findById(req.params.chatId);
-    const adminId = chat.admin?._id || chat.admin;
-    if (adminId.toString() !== req.user.id)
+    const isAdmin = chat.admins?.some(a => a.toString() === req.user.id) ||
+      (chat.admin?._id || chat.admin)?.toString() === req.user.id;
+    if (!isAdmin)
       return res.status(403).json({ message: 'Only admin can assign new admin' });
-    await Chat.findByIdAndUpdate(req.params.chatId, { admin: req.body.memberId });
+    await Chat.findByIdAndUpdate(req.params.chatId, {
+      $addToSet: { admins: req.body.memberId }
+    });
     res.json({ message: 'New admin assigned' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.put('/:chatId/remove-admin', auth, async (req, res) => {
+  try {
+    const chat = await Chat.findById(req.params.chatId);
+    const ownerId = (chat.admin?._id || chat.admin)?.toString();
+    if (ownerId !== req.user.id)
+      return res.status(403).json({ message: 'Only group creator can remove admins' });
+    if (req.body.memberId === ownerId)
+      return res.status(400).json({ message: 'Cannot remove creator from admin' });
+    await Chat.findByIdAndUpdate(req.params.chatId, {
+      $pull: { admins: req.body.memberId }
+    });
+    res.json({ message: 'Admin removed' });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -169,13 +190,16 @@ router.put('/:chatId/leave', auth, async (req, res) => {
   try {
     const chat = await Chat.findById(req.params.chatId);
     await Chat.findByIdAndUpdate(req.params.chatId, {
-      $pull: { members: req.user.id }
+      $pull: { members: req.user.id, admins: req.user.id }
     });
-    const adminId = chat.admin?._id || chat.admin;
-    if (adminId && adminId.toString() === req.user.id) {
+    const ownerId = (chat.admin?._id || chat.admin)?.toString();
+    if (ownerId && ownerId === req.user.id) {
       const remaining = chat.members.filter(m => m.toString() !== req.user.id);
       if (remaining.length > 0) {
-        await Chat.findByIdAndUpdate(req.params.chatId, { admin: remaining[0] });
+        await Chat.findByIdAndUpdate(req.params.chatId, {
+          admin: remaining[0],
+          $addToSet: { admins: remaining[0] }
+        });
       } else {
         await Chat.findByIdAndDelete(req.params.chatId);
       }

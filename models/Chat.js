@@ -6,6 +6,7 @@ const chatSchema = new mongoose.Schema({
   description: { type: String, default: '' },
   members: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   admin: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  admins: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   lastMessage: { type: mongoose.Schema.Types.ObjectId, ref: 'Message', default: null },
   clearedBy: [{
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
