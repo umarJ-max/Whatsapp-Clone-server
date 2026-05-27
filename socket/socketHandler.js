@@ -62,8 +62,14 @@ module.exports = (io) => {
         }
 
         const message = await Message.create({
-          chat: chatId, sender: senderId, text, status: 'sent'
+          chat: chatId,
+          sender: senderId,
+          text,
+          status: 'sent',
+          readBy: [],
+          deliveredTo: []
         });
+
         await Chat.findByIdAndUpdate(chatId, { lastMessage: message._id });
         const populated = await message.populate('sender', 'name');
         io.to(chatId).emit('newMessage', populated);
@@ -71,11 +77,16 @@ module.exports = (io) => {
         const sender = await User.findById(senderId);
 
         chat.members.forEach(async (member) => {
-          const memberId = member._id || member;
-          if (memberId.toString() !== senderId) {
-            if (onlineUsers.has(memberId.toString())) {
-              await Message.findByIdAndUpdate(message._id, { status: 'delivered' });
-              io.to(chatId).emit('messageStatus', { messageId: message._id, status: 'delivered' });
+          const memberId = (member._id || member).toString();
+          if (memberId !== senderId) {
+            if (onlineUsers.has(memberId)) {
+              await Message.findByIdAndUpdate(message._id, {
+                $addToSet: { deliveredTo: { user: memberId } }
+              });
+              io.to(chatId).emit('messageStatus', {
+                messageId: message._id,
+                status: 'delivered'
+              });
             } else {
               const recipient = await User.findById(memberId);
               if (recipient?.pushToken) {
@@ -92,10 +103,36 @@ module.exports = (io) => {
 
     socket.on('markRead', async ({ chatId, userId }) => {
       try {
-        await Message.updateMany(
-          { chat: chatId, sender: { $ne: userId }, status: { $ne: 'read' } },
-          { status: 'read' }
-        );
+        const chat = await Chat.findById(chatId);
+        const totalMembers = chat.members.length - 1; // exclude sender
+
+        // Mark all unread messages as read by this user
+        const messages = await Message.find({
+          chat: chatId,
+          sender: { $ne: userId },
+          'readBy.user': { $ne: userId }
+        });
+
+        for (const msg of messages) {
+          await Message.findByIdAndUpdate(msg._id, {
+            $addToSet: { readBy: { user: userId, readAt: new Date() } }
+          });
+
+          const updatedMsg = await Message.findById(msg._id);
+          const readCount = updatedMsg.readBy.length;
+
+          // If all members have read, mark as read, otherwise delivered
+          const newStatus = readCount >= totalMembers ? 'read' : 'delivered';
+          await Message.findByIdAndUpdate(msg._id, { status: newStatus });
+
+          io.to(chatId).emit('messageStatusUpdate', {
+            messageId: msg._id,
+            status: newStatus,
+            readBy: updatedMsg.readBy,
+            deliveredTo: updatedMsg.deliveredTo
+          });
+        }
+
         io.to(chatId).emit('messagesRead', { chatId, userId });
       } catch (err) {
         console.log(err);
