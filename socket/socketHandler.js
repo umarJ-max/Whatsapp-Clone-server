@@ -40,6 +40,14 @@ module.exports = (io) => {
       socket.join(chatId);
     });
 
+    socket.on('typing', ({ chatId, userId, userName }) => {
+      socket.to(chatId).emit('userTyping', { userId, userName });
+    });
+
+    socket.on('stopTyping', ({ chatId, userId }) => {
+      socket.to(chatId).emit('userStopTyping', { userId });
+    });
+
     socket.on('sendMessage', async ({ chatId, senderId, text }) => {
       try {
         const chat = await Chat.findById(chatId).populate('members');
@@ -69,7 +77,6 @@ module.exports = (io) => {
               await Message.findByIdAndUpdate(message._id, { status: 'delivered' });
               io.to(chatId).emit('messageStatus', { messageId: message._id, status: 'delivered' });
             } else {
-              // Send push notification to offline user
               const recipient = await User.findById(memberId);
               if (recipient?.pushToken) {
                 const title = chat.isGroup ? `${chat.name}` : sender.name;
