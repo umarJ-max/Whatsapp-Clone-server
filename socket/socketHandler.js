@@ -81,7 +81,7 @@ module.exports = (io) => {
           if (memberId !== senderId) {
             if (onlineUsers.has(memberId)) {
               await Message.findByIdAndUpdate(message._id, {
-                $addToSet: { deliveredTo: { user: memberId } }
+                $push: { deliveredTo: { user: memberId, deliveredAt: new Date() } }
               });
               io.to(chatId).emit('messageStatus', {
                 messageId: message._id,
@@ -104,9 +104,8 @@ module.exports = (io) => {
     socket.on('markRead', async ({ chatId, userId }) => {
       try {
         const chat = await Chat.findById(chatId);
-        const totalMembers = chat.members.length - 1; // exclude sender
+        const totalMembers = chat.members.length - 1;
 
-        // Mark all unread messages as read by this user
         const messages = await Message.find({
           chat: chatId,
           sender: { $ne: userId },
@@ -115,20 +114,30 @@ module.exports = (io) => {
 
         for (const msg of messages) {
           await Message.findByIdAndUpdate(msg._id, {
-            $addToSet: { readBy: { user: userId, readAt: new Date() } }
+            $push: {
+              readBy: { user: userId, readAt: new Date() }
+            }
           });
 
           const updatedMsg = await Message.findById(msg._id);
-          const readCount = updatedMsg.readBy.length;
 
-          // If all members have read, mark as read, otherwise delivered
+          // Deduplicate readBy by user
+          const uniqueReaders = [...new Map(
+            updatedMsg.readBy.map(r => [r.user.toString(), r])
+          ).values()];
+
+          const readCount = uniqueReaders.length;
           const newStatus = readCount >= totalMembers ? 'read' : 'delivered';
-          await Message.findByIdAndUpdate(msg._id, { status: newStatus });
+
+          await Message.findByIdAndUpdate(msg._id, {
+            status: newStatus,
+            readBy: uniqueReaders
+          });
 
           io.to(chatId).emit('messageStatusUpdate', {
             messageId: msg._id,
             status: newStatus,
-            readBy: updatedMsg.readBy,
+            readBy: uniqueReaders,
             deliveredTo: updatedMsg.deliveredTo
           });
         }
